@@ -1,7 +1,9 @@
 /* ===========================
    CONFIG — CHANGE THESE
-   =========================== */
-const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTlv6QJ03KC1bqTbshjE8ykrBPiz7ki5yZ0HjR6Q7wa6L6PObaPNLjBPhnBSa7yU7i5SkIrJx4Ddkhz/pub?gid=0&single=true&output=csv";
+   =========================== 
+ const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTlv6QJ03KC1bqTbshjE8ykrBPiz7ki5yZ0HjR6Q7wa6L6PObaPNLjBPhnBSa7yU7i5SkIrJx4Ddkhz/pub?gid=0&single=true&output=csv";
+*/
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1MwhCOyGu3QycOVoU9DKCfRuXO4o6HVjuKcxjuWyveKg/edit?gid=0#gid=0/pub?gid=0&single=true&output=csv";
 
 const ID_COLUMN       = "StandID";
 const STATUS_COLUMN   = "Status";
@@ -454,3 +456,4 @@ document.addEventListener('DOMContentLoaded', () => {
   init();
   setupPanZoom();
 });
+
