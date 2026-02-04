@@ -164,8 +164,8 @@ h2 { margin:0 0 6px; font-size:18px; }
 
   /* Map on top, fixed height */
   #mapCard {
-    height: 38vh;
-    min-height: 240px;
+    height: 55vh;
+    min-height: 300px;
     order: 1;
   }
   #mapWrap, svg#mapSvg { height: 100%; }
