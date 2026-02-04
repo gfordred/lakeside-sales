@@ -33,6 +33,9 @@ const ALIGN_TWEAK = { scale: 0.744, dx: 475, dy: -105, rotateDeg: 0 };
 const svg     = document.getElementById("mapSvg");
 const details = document.getElementById("details");
 let lockedId  = "";
+let mapInteractionEnabled = false;
+let isMobile = false;
+let globalStatusMap = {};
 
 /* ===========================
    HELPERS
@@ -227,23 +230,44 @@ async function loadSheet() {
 }
 
 async function loadPolygons(){
+  let polygons = [];
   if (POLYGONS_JSON_URL){
     const res = await fetch(POLYGONS_JSON_URL, { cache:'no-store' });
     const data = await res.json();
-    return Array.isArray(data.polygons) ? data.polygons : [];
-  }
-  const inline = document.getElementById('polygons-data');
-  if (inline && inline.textContent.trim()){
-    try {
-      const data = JSON.parse(inline.textContent);
-      return Array.isArray(data.polygons) ? data.polygons : [];
-    } catch (e){
-      console.error('Polygons inline JSON parse error:', e);
-      alert('Polygons JSON is not valid. Check for trailing commas or stray text.');
-      return [];
+    polygons = Array.isArray(data.polygons) ? data.polygons : [];
+  } else {
+    const inline = document.getElementById('polygons-data');
+    if (inline && inline.textContent.trim()){
+      try {
+        const data = JSON.parse(inline.textContent);
+        polygons = Array.isArray(data.polygons) ? data.polygons : [];
+      } catch (e){
+        console.error('Polygons inline JSON parse error:', e);
+        alert('Polygons JSON is not valid. Check for trailing commas or stray text.');
+        return [];
+      }
     }
   }
-  return [];
+  
+  // Detect and fix duplicate IDs
+  const idMap = new Map();
+  const normalized = polygons.map((poly, idx) => {
+    let id = poly.id;
+    const normalizedId = norm(id);
+    
+    if (idMap.has(normalizedId)) {
+      const count = idMap.get(normalizedId);
+      idMap.set(normalizedId, count + 1);
+      const newId = `${id}-dup${count}`;
+      console.warn(`Duplicate polygon ID detected: "${id}" renamed to "${newId}"`);
+      return { ...poly, id: newId };
+    } else {
+      idMap.set(normalizedId, 1);
+      return poly;
+    }
+  });
+  
+  return normalized;
 }
 
 /* ===========================
@@ -256,6 +280,7 @@ function makePolygon({ id: polyId, points }, statusMap) {
   const p = document.createElementNS(svgNS, "polygon");
   p.setAttribute("points", points);
   if (polyId) p.setAttribute("id", polyId);
+  p.setAttribute("data-stand-id", polyId);
 
   const rec =
     statusMap[norm(polyId || "")] ||
@@ -270,38 +295,85 @@ function makePolygon({ id: polyId, points }, statusMap) {
   p.style.strokeWidth = "1";
   p.style.pointerEvents = "auto";
 
-  p.addEventListener("mouseenter", () => {
-    if (!lockedId || lockedId === polyId) showDetails(polyId, rec, lockedId === polyId);
-  });
-  p.addEventListener("mouseleave", () => { if (!lockedId) clearDetails(); });
+  // Create forgiving hit area (invisible overlay with wider stroke)
+  const hitArea = document.createElementNS(svgNS, "polygon");
+  hitArea.setAttribute("points", points);
+  hitArea.setAttribute("data-hit-for", polyId);
+  hitArea.style.fill = "transparent";
+  hitArea.style.stroke = "transparent";
+  hitArea.style.strokeWidth = isMobile ? "15" : "8";
+  hitArea.style.pointerEvents = "stroke";
+  hitArea.style.cursor = "pointer";
 
-  // Click-to-lock with a little movement slop
+  // Shared interaction handlers
+  const handlePointerInteraction = (target) => {
+    const standId = target.getAttribute("data-stand-id") || target.getAttribute("data-hit-for");
+    if (!standId) return null;
+    return standId;
+  };
+
+  const onPointerEnter = (ev) => {
+    const standId = handlePointerInteraction(ev.target);
+    if (standId && (!lockedId || lockedId === standId)) {
+      const currentRec = globalStatusMap[norm(standId)] || globalStatusMap[norm(standId.replace(/^stand-/, ""))] || null;
+      showDetails(standId, currentRec, lockedId === standId);
+    }
+  };
+
+  const onPointerLeave = (ev) => {
+    if (!lockedId) clearDetails();
+  };
+
+  // Click-to-lock with movement slop
   let downX = 0, downY = 0, downPid = null;
-  const CLICK_SLOP = 6;
+  const CLICK_SLOP = isMobile ? 10 : 6;
 
-  p.addEventListener("pointerdown", (ev) => {
+  const onPointerDown = (ev) => {
     downX = ev.clientX; downY = ev.clientY;
     downPid = ev.pointerId;
-    try { p.setPointerCapture(downPid); } catch {}
-  });
+  };
 
-  p.addEventListener("pointerup", (ev) => {
+  const onPointerUp = (ev) => {
+    const standId = handlePointerInteraction(ev.target);
+    if (!standId) return;
+    
     const moved = Math.hypot(ev.clientX - downX, ev.clientY - downY) > CLICK_SLOP;
-    if (downPid !== null) { try { p.releasePointerCapture(downPid); } catch {} downPid = null; }
+    downPid = null;
     if (moved) return;
 
-    if (lockedId === polyId) {
+    if (lockedId === standId) {
       lockedId = "";
       clearDetails();
       setActivePolygon(null);
     } else {
-      lockedId = polyId;
-      showDetails(polyId, rec, true);
-      setActivePolygon(polyId);
+      lockedId = standId;
+      const currentRec = globalStatusMap[norm(standId)] || globalStatusMap[norm(standId.replace(/^stand-/, ""))] || null;
+      showDetails(standId, currentRec, true);
+      setActivePolygon(standId);
+      
+      // Scroll details into view on mobile
+      if (isMobile) {
+        setTimeout(() => {
+          const detailsEl = document.getElementById('details');
+          if (detailsEl) {
+            detailsEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        }, 100);
+      }
     }
+  };
+
+  // Attach handlers to both polygon and hit area
+  [p, hitArea].forEach(el => {
+    el.addEventListener("mouseenter", onPointerEnter);
+    el.addEventListener("mouseleave", onPointerLeave);
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointerup", onPointerUp);
   });
 
-  getPolysLayer().appendChild(p);
+  const layer = getPolysLayer();
+  layer.appendChild(p);
+  layer.appendChild(hitArea);
 }
 
 function setActivePolygon(id) {
@@ -364,6 +436,11 @@ function setupPanZoom() {
   const zoomOutBtn = document.getElementById('zoomOut');
   const zoomResetBtn = document.getElementById('zoomReset');
 
+  // Add aria-labels for accessibility
+  if (zoomInBtn) zoomInBtn.setAttribute('aria-label', 'Zoom in');
+  if (zoomOutBtn) zoomOutBtn.setAttribute('aria-label', 'Zoom out');
+  if (zoomResetBtn) zoomResetBtn.setAttribute('aria-label', 'Reset zoom');
+
   function applyTransform() {
     vp.setAttribute('transform', `translate(${tx} ${ty}) scale(${scale})`);
     svg.classList.toggle('can-pan', scale > 1.001);
@@ -386,6 +463,7 @@ function setupPanZoom() {
   }
 
   svg.addEventListener('wheel', (e) => {
+    if (isMobile && !mapInteractionEnabled) return;
     e.preventDefault();
     const delta = -e.deltaY * 0.0015;
     zoomAt(e.clientX, e.clientY, delta);
@@ -393,7 +471,12 @@ function setupPanZoom() {
 
   svg.addEventListener('pointerdown', (e) => {
     if (e.target.closest && e.target.closest('#polys-layer polygon')) return;
+    if (e.target.closest && e.target.closest('#polys-layer polygon[data-hit-for]')) return;
     if (e.button !== 0) return;
+    
+    // On mobile, only allow panning if map interaction is enabled
+    if (isMobile && !mapInteractionEnabled) return;
+    
     isPanning = true;
     svg.setPointerCapture(e.pointerId);
     svg.classList.add('grabbing');
@@ -425,12 +508,76 @@ function setupPanZoom() {
 }
 
 /* ===========================
+   MAP INTERACTION MODE (MOBILE)
+   =========================== */
+function setupMapInteractionToggle() {
+  // Check if mobile
+  isMobile = window.matchMedia('(max-width: 768px)').matches;
+  if (!isMobile) return;
+
+  // Create toggle button
+  const mapWrap = document.getElementById('mapWrap');
+  if (!mapWrap) return;
+
+  const toggleContainer = document.createElement('div');
+  toggleContainer.className = 'map-mode-toggle';
+  
+  const toggleBtn = document.createElement('button');
+  toggleBtn.setAttribute('aria-label', 'Toggle map interaction mode');
+  toggleBtn.setAttribute('aria-pressed', 'false');
+  
+  // Load saved preference
+  const savedMode = localStorage.getItem('mapInteractionMode');
+  if (savedMode === 'enabled') {
+    mapInteractionEnabled = true;
+  }
+  
+  function updateToggleUI() {
+    if (mapInteractionEnabled) {
+      toggleBtn.textContent = '🗺️ Move Map';
+      toggleBtn.classList.add('active');
+      toggleBtn.setAttribute('aria-pressed', 'true');
+      svg.style.touchAction = 'none';
+    } else {
+      toggleBtn.textContent = '📜 Scroll Page';
+      toggleBtn.classList.remove('active');
+      toggleBtn.setAttribute('aria-pressed', 'false');
+      svg.style.touchAction = 'pan-y pinch-zoom';
+    }
+  }
+  
+  toggleBtn.addEventListener('click', () => {
+    mapInteractionEnabled = !mapInteractionEnabled;
+    localStorage.setItem('mapInteractionMode', mapInteractionEnabled ? 'enabled' : 'disabled');
+    updateToggleUI();
+  });
+  
+  updateToggleUI();
+  toggleContainer.appendChild(toggleBtn);
+  mapWrap.appendChild(toggleContainer);
+  
+  // Update on resize
+  window.addEventListener('resize', () => {
+    const nowMobile = window.matchMedia('(max-width: 768px)').matches;
+    if (nowMobile !== isMobile) {
+      isMobile = nowMobile;
+      if (!isMobile) {
+        svg.style.touchAction = 'none';
+      } else {
+        updateToggleUI();
+      }
+    }
+  });
+}
+
+/* ===========================
    INIT
    =========================== */
 async function init(){
   fitSvgToArtwork();
 
   const [{ statusMap, lastUpdated }, polysRaw] = await Promise.all([loadSheet(), loadPolygons()]);
+  globalStatusMap = statusMap;
   const polys = remapPolygonsToArtwork(polysRaw);
 
   const layer = getPolysLayer();
@@ -455,8 +602,12 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Detect mobile early
+  isMobile = window.matchMedia('(max-width: 768px)').matches;
+  
   init();
   setupPanZoom();
+  setupMapInteractionToggle();
 });
 
 
