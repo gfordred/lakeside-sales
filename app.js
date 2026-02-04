@@ -319,12 +319,18 @@ function makePolygon({ id: polyId, points, originalId }, statusMap) {
   p.addEventListener("pointerdown", (ev) => {
     downX = ev.clientX; downY = ev.clientY;
     downPid = ev.pointerId;
-    try { p.setPointerCapture(downPid); } catch {}
+    
+    // On mobile in pan mode, allow dragging via polygons - don't capture
+    if (!(isMobile && mapInteractionMode === 'pan')) {
+      try { p.setPointerCapture(downPid); } catch {}
+    }
   });
 
   p.addEventListener("pointerup", (ev) => {
     const moved = Math.hypot(ev.clientX - downX, ev.clientY - downY) > CLICK_SLOP;
     if (downPid !== null) { try { p.releasePointerCapture(downPid); } catch {} downPid = null; }
+    
+    // If moved significantly, don't treat as a click
     if (moved) return;
 
     if (lockedId === polyId) {
@@ -498,8 +504,11 @@ function setupPanZoom() {
 
   // Pan/drag behavior
   svg.addEventListener('pointerdown', (e) => {
-    // Don't pan if clicking on a polygon or hit area
-    if (e.target.closest && (e.target.closest('#polys-layer polygon') || e.target.closest('#hit-layer polygon'))) return;
+    // On mobile in pan mode, allow panning even when touching polygons
+    const touchingPolygon = e.target.closest && (e.target.closest('#polys-layer polygon') || e.target.closest('#hit-layer polygon'));
+    
+    // Desktop: don't pan if clicking on a polygon
+    if (!isMobile && touchingPolygon) return;
     
     // On mobile, only allow panning in 'pan' mode
     if (isMobile && mapInteractionMode === 'scroll') return;
