@@ -451,8 +451,15 @@ function setupPanZoom() {
   const vp = svg.querySelector('#viewport');
   if (!vp) return;
 
-  let scale = 1, minScale = 0.7, maxScale = 4;
-  let tx = 0, ty = 0;
+  // Calculate initial position - 30% right and centered
+  const rect = svg.getBoundingClientRect();
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  const initialOffsetX = -rect.width * 0.30; // Negative for right shift
+  const initialOffsetY = 0;
+
+  let scale = 1.35, minScale = 0.7, maxScale = 4;
+  let tx = initialOffsetX, ty = initialOffsetY;
   let isPanning = false;
   let lastX = 0, lastY = 0;
 
