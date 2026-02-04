@@ -1,20 +1,42 @@
-:root { color-scheme: light; }
+:root { 
+  color-scheme: dark;
+  /* Dark blue theme palette */
+  --primary-blue: #1e3a5f;
+  --secondary-blue: #2c5282;
+  --accent-blue: #4a90e2;
+  --dark-bg: #0f1c2e;
+  --card-bg: #1a2942;
+  --text-light: #e8eef5;
+  --text-muted: #a0aec0;
+  --border-color: #2d4a6f;
+  --hover-bg: #243a5e;
+}
 
 /* Layout */
-html, body { height:100%; margin:0; overflow: hidden; font-family: Arial, Helvetica, sans-serif; font-size: clamp(16px, 2vw, 18px); line-height: 1.5; }
+html, body { 
+  height:100%; 
+  margin:0; 
+  overflow: hidden; 
+  font-family: Arial, Helvetica, sans-serif; 
+  font-size: clamp(16px, 2vw, 18px); 
+  line-height: 1.5;
+  background: var(--dark-bg);
+  color: var(--text-light);
+}
 
 /* Header with logo */
 #header {
-  background: #fff;
-  padding: 16px 20px;
-  border-bottom: 2px solid #e5e7eb;
+  background: linear-gradient(135deg, var(--primary-blue) 0%, var(--secondary-blue) 100%);
+  padding: 24px 20px;
+  border-bottom: 2px solid var(--accent-blue);
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
 }
 
 #layout { 
-  height: calc(100vh - 80px);
+  height: calc(100vh - 192px);
   overflow: hidden; 
   display:flex; 
   gap: 12px; 
@@ -23,7 +45,15 @@ html, body { height:100%; margin:0; overflow: hidden; font-family: Arial, Helvet
 }
 
 /* Left map column */
-#mapCard { flex:1; overflow:hidden; min-height: 0; background:#fff; border-radius: 8px; }
+#mapCard { 
+  flex:1; 
+  overflow:hidden; 
+  min-height: 0; 
+  background: var(--card-bg); 
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
 #mapWrap { width:100%; height:100%; position:relative; }
 svg#mapSvg { display:block; width:100%; height:100%; cursor:default; }
 
@@ -57,19 +87,24 @@ svg#mapSvg { display:block; width:100%; height:100%; cursor:default; }
   z-index: 5;
 }
 .zoom-controls button {
-  border: 1px solid rgba(0,0,0,.2);
-  background: #fff;
+  border: 1px solid var(--accent-blue);
+  background: var(--secondary-blue);
+  color: var(--text-light);
   border-radius: 8px;
   padding: 6px 10px;
   font: 600 14px/1 Arial, Helvetica, sans-serif;
-  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,.4);
   cursor: pointer;
   min-width: 44px;
   min-height: 44px;
+  transition: background 0.2s, transform 0.1s;
+}
+.zoom-controls button:hover {
+  background: var(--accent-blue);
 }
 .zoom-controls button:active { transform: translateY(1px); }
 .zoom-controls button:focus-visible {
-  outline: 3px solid #2563eb;
+  outline: 3px solid var(--accent-blue);
   outline-offset: 2px;
 }
 
@@ -84,34 +119,39 @@ svg#mapSvg { display:block; width:100%; height:100%; cursor:default; }
   flex-direction: column;
   gap: 0;
   overscroll-behavior: contain;
-  background:#fff;
+  background: var(--card-bg);
   border-radius: 8px;
   padding: 20px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
 #logo { 
-  height: 48px; 
+  height: 144px; 
   width: auto; 
-  display: block; 
+  display: block;
+  filter: brightness(1.1) contrast(1.05);
+  mix-blend-mode: screen;
+  opacity: 0.95;
 }
 h2 { 
   margin:0 0 8px; 
   font-size:18px; 
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-light);
 }
 
 h3 {
   margin: 0 0 8px;
   font-size: 16px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-light);
 }
 
-.muted { color:#4b5563; font-size: 14px; }
+.muted { color: var(--text-muted); font-size: 14px; }
 
 #details { 
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--primary-blue);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 12px;
   margin-bottom: 16px;
@@ -125,7 +165,7 @@ h3 {
 }
 .detail-label { 
   width:80px; 
-  color:#6b7280; 
+  color: var(--text-muted); 
   font-size: 13px;
   font-weight: 500;
   flex-shrink: 0;
@@ -141,7 +181,14 @@ h3 {
 .swatch.yellow { background:#f4b400; }
 .swatch.red { background:#d93025; }
 .swatch.gray { background:#9ea3a8; }
-.pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #e5e7eb; }
+.pill { 
+  display:inline-block; 
+  padding:2px 8px; 
+  border-radius:999px; 
+  font-size:12px; 
+  border:1px solid var(--border-color);
+  background: rgba(74, 144, 226, 0.2);
+}
 
 /* Map interaction toggle */
 .map-interaction-toggle {
@@ -149,27 +196,29 @@ h3 {
   bottom: 12px;
   left: 12px;
   z-index: 10;
-  background: #fff;
-  border: 2px solid #2563eb;
+  background: var(--secondary-blue);
+  border: 2px solid var(--accent-blue);
   border-radius: 8px;
   padding: 10px 16px;
   font: 600 15px/1.4 Arial, Helvetica, sans-serif;
-  box-shadow: 0 2px 12px rgba(0,0,0,.2);
+  box-shadow: 0 2px 12px rgba(0,0,0,.4);
   cursor: pointer;
   min-height: 44px;
   display: none;
+  color: var(--text-light);
+  transition: background 0.2s;
 }
 .map-interaction-toggle:focus-visible {
-  outline: 3px solid #2563eb;
+  outline: 3px solid var(--accent-blue);
   outline-offset: 2px;
 }
 .map-interaction-toggle.scroll-mode {
-  background: #fff;
-  color: #1e40af;
+  background: var(--secondary-blue);
+  color: var(--text-light);
 }
 .map-interaction-toggle.pan-mode {
-  background: #2563eb;
-  color: #fff;
+  background: var(--accent-blue);
+  color: var(--text-light);
 }
 
 /* Hit area overlays for easier tapping */
@@ -184,7 +233,7 @@ h3 {
 /* Focus styles for accessibility */
 button:focus-visible,
 a:focus-visible {
-  outline: 3px solid #2563eb;
+  outline: 3px solid var(--accent-blue);
   outline-offset: 2px;
 }
 
@@ -204,8 +253,8 @@ a:focus-visible {
 
 /* Legend */
 #legendBlock {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
+  background: var(--primary-blue);
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 12px;
 }
@@ -233,16 +282,16 @@ a:focus-visible {
   }
   
   #header {
-    padding: 12px 16px;
+    padding: 20px 16px;
   }
   
   #logo {
-    height: 40px;
+    height: 120px;
   }
   
   #layout { 
     flex-direction: column; 
-    min-height: calc(100vh - 64px);
+    min-height: calc(100vh - 160px);
     height: auto;
     padding: 8px; 
     gap: 8px; 
@@ -265,8 +314,8 @@ a:focus-visible {
     height: auto;
     max-height: none;
     overflow: visible;
-    border-top: 1px solid #e5e7eb;
-    box-shadow: none;
+    border-top: 1px solid var(--border-color);
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.3);
     order: 2;
     display: block;
     padding: 16px;

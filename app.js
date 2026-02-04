@@ -481,11 +481,11 @@ function setupPanZoom() {
     applyTransform();
   }
 
-  // Wheel zoom (desktop only)
+  // Wheel zoom (desktop only) - increased speed from 0.0015 to 0.003
   svg.addEventListener('wheel', (e) => {
     if (isMobile && mapInteractionMode === 'scroll') return;
     e.preventDefault();
-    const delta = -e.deltaY * 0.0015;
+    const delta = -e.deltaY * 0.003;
     zoomAt(e.clientX, e.clientY, delta);
   }, { passive:false });
 
@@ -506,8 +506,9 @@ function setupPanZoom() {
   
   svg.addEventListener('pointermove', (e) => {
     if (!isPanning) return;
-    const dx = e.clientX - lastX;
-    const dy = e.clientY - lastY;
+    // Increased pan speed by 1.5x multiplier for faster movement
+    const dx = (e.clientX - lastX) * 1.5;
+    const dy = (e.clientY - lastY) * 1.5;
     lastX = e.clientX; lastY = e.clientY;
     tx += dx;
     ty += dy;
@@ -524,14 +525,14 @@ function setupPanZoom() {
     svg.classList.remove('grabbing');
   });
 
-  // Zoom buttons with aria-labels
+  // Zoom buttons with aria-labels - increased from 0.25 to 0.35 for faster zoom
   if (zoomInBtn) {
     zoomInBtn.setAttribute('aria-label', 'Zoom in');
-    zoomInBtn.addEventListener('click', () => zoomAt(undefined, undefined, +0.25));
+    zoomInBtn.addEventListener('click', () => zoomAt(undefined, undefined, +0.35));
   }
   if (zoomOutBtn) {
     zoomOutBtn.setAttribute('aria-label', 'Zoom out');
-    zoomOutBtn.addEventListener('click', () => zoomAt(undefined, undefined, -0.25));
+    zoomOutBtn.addEventListener('click', () => zoomAt(undefined, undefined, -0.35));
   }
   if (zoomResetBtn) {
     zoomResetBtn.setAttribute('aria-label', 'Reset zoom');
