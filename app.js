@@ -33,9 +33,8 @@ const ALIGN_TWEAK = { scale: 0.744, dx: 475, dy: -105, rotateDeg: 0 };
 const svg     = document.getElementById("mapSvg");
 const details = document.getElementById("details");
 let lockedId  = "";
-let mapInteractionEnabled = false;
+let mapInteractionMode = localStorage.getItem('mapInteractionMode') || 'scroll'; // 'scroll' or 'pan'
 let isMobile = false;
-let globalStatusMap = {};
 
 /* ===========================
    HELPERS
@@ -230,44 +229,51 @@ async function loadSheet() {
 }
 
 async function loadPolygons(){
-  let polygons = [];
   if (POLYGONS_JSON_URL){
     const res = await fetch(POLYGONS_JSON_URL, { cache:'no-store' });
     const data = await res.json();
-    polygons = Array.isArray(data.polygons) ? data.polygons : [];
-  } else {
-    const inline = document.getElementById('polygons-data');
-    if (inline && inline.textContent.trim()){
-      try {
-        const data = JSON.parse(inline.textContent);
-        polygons = Array.isArray(data.polygons) ? data.polygons : [];
-      } catch (e){
-        console.error('Polygons inline JSON parse error:', e);
-        alert('Polygons JSON is not valid. Check for trailing commas or stray text.');
-        return [];
-      }
+    return Array.isArray(data.polygons) ? data.polygons : [];
+  }
+  const inline = document.getElementById('polygons-data');
+  if (inline && inline.textContent.trim()){
+    try {
+      const data = JSON.parse(inline.textContent);
+      return Array.isArray(data.polygons) ? data.polygons : [];
+    } catch (e){
+      console.error('Polygons inline JSON parse error:', e);
+      alert('Polygons JSON is not valid. Check for trailing commas or stray text.');
+      return [];
     }
   }
+  return [];
+}
+
+function detectAndFixDuplicateIds(polys) {
+  const seen = new Map();
+  const fixed = [];
+  const issues = [];
   
-  // Detect and fix duplicate IDs
-  const idMap = new Map();
-  const normalized = polygons.map((poly, idx) => {
-    let id = poly.id;
-    const normalizedId = norm(id);
+  polys.forEach((poly, idx) => {
+    const normalizedId = norm(poly.id);
     
-    if (idMap.has(normalizedId)) {
-      const count = idMap.get(normalizedId);
-      idMap.set(normalizedId, count + 1);
-      const newId = `${id}-dup${count}`;
-      console.warn(`Duplicate polygon ID detected: "${id}" renamed to "${newId}"`);
-      return { ...poly, id: newId };
+    if (seen.has(normalizedId)) {
+      const dupCount = seen.get(normalizedId);
+      seen.set(normalizedId, dupCount + 1);
+      const newId = `${poly.id}-dup${dupCount}`;
+      issues.push(`Duplicate ID detected: "${poly.id}" at index ${idx}. Auto-renamed to "${newId}"`);
+      fixed.push({ ...poly, id: newId, originalId: poly.id });
     } else {
-      idMap.set(normalizedId, 1);
-      return poly;
+      seen.set(normalizedId, 1);
+      fixed.push(poly);
     }
   });
   
-  return normalized;
+  if (issues.length > 0) {
+    console.warn('⚠️ Polygon ID issues detected:');
+    issues.forEach(issue => console.warn('  - ' + issue));
+  }
+  
+  return fixed;
 }
 
 /* ===========================
@@ -275,83 +281,62 @@ async function loadPolygons(){
    =========================== */
 function colorForStatus(key) { return COLORS[key] || COLORS.unknown; }
 
-function makePolygon({ id: polyId, points }, statusMap) {
+function makePolygon({ id: polyId, points, originalId }, statusMap) {
   const svgNS = "http://www.w3.org/2000/svg";
   const p = document.createElementNS(svgNS, "polygon");
   p.setAttribute("points", points);
   if (polyId) p.setAttribute("id", polyId);
-  p.setAttribute("data-stand-id", polyId);
+  p.setAttribute("data-stand-id", originalId || polyId);
 
+  const lookupId = originalId || polyId;
   const rec =
-    statusMap[norm(polyId || "")] ||
-    statusMap[norm((polyId || "").replace(/^stand-/, ""))] ||
+    statusMap[norm(lookupId || "")] ||
+    statusMap[norm((lookupId || "").replace(/^stand-/, ""))] ||
     null;
   const stat = rec ? rec.status : "unknown";
 
   p.style.fill = (COLORS[stat] || COLORS.unknown);
   p.style.fillOpacity = FILL_OPACITY;
   p.style.stroke = "#000";
-  p.style.strokeOpacity = 0.35;
+  p.style.strokeOpacity = 0.5;
   p.style.strokeWidth = "1";
   p.style.pointerEvents = "auto";
 
-  // Create forgiving hit area (invisible overlay with wider stroke)
-  const hitArea = document.createElementNS(svgNS, "polygon");
-  hitArea.setAttribute("points", points);
-  hitArea.setAttribute("data-hit-for", polyId);
-  hitArea.style.fill = "transparent";
-  hitArea.style.stroke = "transparent";
-  hitArea.style.strokeWidth = isMobile ? "15" : "8";
-  hitArea.style.pointerEvents = "stroke";
-  hitArea.style.cursor = "pointer";
-
-  // Shared interaction handlers
-  const handlePointerInteraction = (target) => {
-    const standId = target.getAttribute("data-stand-id") || target.getAttribute("data-hit-for");
-    if (!standId) return null;
-    return standId;
-  };
-
-  const onPointerEnter = (ev) => {
-    const standId = handlePointerInteraction(ev.target);
-    if (standId && (!lockedId || lockedId === standId)) {
-      const currentRec = globalStatusMap[norm(standId)] || globalStatusMap[norm(standId.replace(/^stand-/, ""))] || null;
-      showDetails(standId, currentRec, lockedId === standId);
+  // Desktop hover behavior
+  p.addEventListener("mouseenter", () => {
+    if (!isMobile && (!lockedId || lockedId === polyId)) {
+      showDetails(polyId, rec, lockedId === polyId);
     }
-  };
+  });
+  p.addEventListener("mouseleave", () => { 
+    if (!isMobile && !lockedId) clearDetails(); 
+  });
 
-  const onPointerLeave = (ev) => {
-    if (!lockedId) clearDetails();
-  };
-
-  // Click-to-lock with movement slop
+  // Unified pointer handling for selection
   let downX = 0, downY = 0, downPid = null;
   const CLICK_SLOP = isMobile ? 10 : 6;
 
-  const onPointerDown = (ev) => {
+  p.addEventListener("pointerdown", (ev) => {
     downX = ev.clientX; downY = ev.clientY;
     downPid = ev.pointerId;
-  };
+    try { p.setPointerCapture(downPid); } catch {}
+  });
 
-  const onPointerUp = (ev) => {
-    const standId = handlePointerInteraction(ev.target);
-    if (!standId) return;
-    
+  p.addEventListener("pointerup", (ev) => {
     const moved = Math.hypot(ev.clientX - downX, ev.clientY - downY) > CLICK_SLOP;
-    downPid = null;
+    if (downPid !== null) { try { p.releasePointerCapture(downPid); } catch {} downPid = null; }
     if (moved) return;
 
-    if (lockedId === standId) {
+    if (lockedId === polyId) {
       lockedId = "";
       clearDetails();
       setActivePolygon(null);
     } else {
-      lockedId = standId;
-      const currentRec = globalStatusMap[norm(standId)] || globalStatusMap[norm(standId.replace(/^stand-/, ""))] || null;
-      showDetails(standId, currentRec, true);
-      setActivePolygon(standId);
+      lockedId = polyId;
+      showDetails(polyId, rec, true);
+      setActivePolygon(polyId);
       
-      // Scroll details into view on mobile
+      // Scroll to details on mobile
       if (isMobile) {
         setTimeout(() => {
           const detailsEl = document.getElementById('details');
@@ -361,19 +346,58 @@ function makePolygon({ id: polyId, points }, statusMap) {
         }, 100);
       }
     }
-  };
-
-  // Attach handlers to both polygon and hit area
-  [p, hitArea].forEach(el => {
-    el.addEventListener("mouseenter", onPointerEnter);
-    el.addEventListener("mouseleave", onPointerLeave);
-    el.addEventListener("pointerdown", onPointerDown);
-    el.addEventListener("pointerup", onPointerUp);
   });
 
-  const layer = getPolysLayer();
-  layer.appendChild(p);
-  layer.appendChild(hitArea);
+  getPolysLayer().appendChild(p);
+  
+  // Create forgiving hit area overlay
+  createHitArea(polyId, points, rec);
+}
+
+function getHitLayer() {
+  let layer = svg.querySelector('#hit-layer');
+  if (!layer) {
+    const vp = svg.querySelector('#viewport') || svg;
+    layer = document.createElementNS(svg.namespaceURI, 'g');
+    layer.setAttribute('id', 'hit-layer');
+    // Insert before polys-layer so hits go to visible polygons
+    const polysLayer = getPolysLayer();
+    vp.insertBefore(layer, polysLayer);
+  }
+  return layer;
+}
+
+function createHitArea(polyId, points, rec) {
+  const svgNS = "http://www.w3.org/2000/svg";
+  const hitPoly = document.createElementNS(svgNS, "polygon");
+  hitPoly.setAttribute("points", points);
+  hitPoly.setAttribute("data-target-id", polyId);
+  
+  // Transparent but with wider stroke for easier tapping
+  hitPoly.style.fill = "transparent";
+  hitPoly.style.stroke = "transparent";
+  hitPoly.style.strokeWidth = isMobile ? "12" : "8";
+  hitPoly.style.pointerEvents = "stroke";
+  hitPoly.style.cursor = "pointer";
+  
+  // Forward clicks to the actual polygon
+  hitPoly.addEventListener("pointerdown", (ev) => {
+    const targetPoly = document.getElementById(polyId);
+    if (targetPoly) {
+      ev.stopPropagation();
+      targetPoly.dispatchEvent(new PointerEvent('pointerdown', ev));
+    }
+  });
+  
+  hitPoly.addEventListener("pointerup", (ev) => {
+    const targetPoly = document.getElementById(polyId);
+    if (targetPoly) {
+      ev.stopPropagation();
+      targetPoly.dispatchEvent(new PointerEvent('pointerup', ev));
+    }
+  });
+  
+  getHitLayer().appendChild(hitPoly);
 }
 
 function setActivePolygon(id) {
@@ -410,7 +434,7 @@ function showDetails(standId, rec, locked = false) {
             }).join("")
         : `<div class="muted">No extra data in sheet for this stand.</div>`
     }
-    ${locked ? `<div class="muted" style="margin-top:8px">Locked. Click the stand again to unlock or press esc.</div>` : "" }
+    ${locked ? `<div class="muted" style="margin-top:8px">${isMobile ? 'Tap' : 'Click'} the stand again to unlock or press Esc.</div>` : "" }
   `;
 }
 
@@ -436,11 +460,6 @@ function setupPanZoom() {
   const zoomOutBtn = document.getElementById('zoomOut');
   const zoomResetBtn = document.getElementById('zoomReset');
 
-  // Add aria-labels for accessibility
-  if (zoomInBtn) zoomInBtn.setAttribute('aria-label', 'Zoom in');
-  if (zoomOutBtn) zoomOutBtn.setAttribute('aria-label', 'Zoom out');
-  if (zoomResetBtn) zoomResetBtn.setAttribute('aria-label', 'Reset zoom');
-
   function applyTransform() {
     vp.setAttribute('transform', `translate(${tx} ${ty}) scale(${scale})`);
     svg.classList.toggle('can-pan', scale > 1.001);
@@ -462,26 +481,29 @@ function setupPanZoom() {
     applyTransform();
   }
 
+  // Wheel zoom (desktop only)
   svg.addEventListener('wheel', (e) => {
-    if (isMobile && !mapInteractionEnabled) return;
+    if (isMobile && mapInteractionMode === 'scroll') return;
     e.preventDefault();
     const delta = -e.deltaY * 0.0015;
     zoomAt(e.clientX, e.clientY, delta);
   }, { passive:false });
 
+  // Pan/drag behavior
   svg.addEventListener('pointerdown', (e) => {
-    if (e.target.closest && e.target.closest('#polys-layer polygon')) return;
-    if (e.target.closest && e.target.closest('#polys-layer polygon[data-hit-for]')) return;
+    // Don't pan if clicking on a polygon or hit area
+    if (e.target.closest && (e.target.closest('#polys-layer polygon') || e.target.closest('#hit-layer polygon'))) return;
+    
+    // On mobile, only allow panning in 'pan' mode
+    if (isMobile && mapInteractionMode === 'scroll') return;
+    
     if (e.button !== 0) return;
-    
-    // On mobile, only allow panning if map interaction is enabled
-    if (isMobile && !mapInteractionEnabled) return;
-    
     isPanning = true;
     svg.setPointerCapture(e.pointerId);
     svg.classList.add('grabbing');
     lastX = e.clientX; lastY = e.clientY;
   });
+  
   svg.addEventListener('pointermove', (e) => {
     if (!isPanning) return;
     const dx = e.clientX - lastX;
@@ -491,99 +513,107 @@ function setupPanZoom() {
     ty += dy;
     applyTransform();
   });
+  
   svg.addEventListener('pointerup', () => {
     isPanning = false;
     svg.classList.remove('grabbing');
   });
+  
   svg.addEventListener('pointercancel', () => {
     isPanning = false;
     svg.classList.remove('grabbing');
   });
 
-  zoomInBtn?.addEventListener('click', () => zoomAt(undefined, undefined, +0.25));
-  zoomOutBtn?.addEventListener('click', () => zoomAt(undefined, undefined, -0.25));
-  zoomResetBtn?.addEventListener('click', () => { scale = 1; tx = 0; ty = 0; applyTransform(); });
+  // Zoom buttons with aria-labels
+  if (zoomInBtn) {
+    zoomInBtn.setAttribute('aria-label', 'Zoom in');
+    zoomInBtn.addEventListener('click', () => zoomAt(undefined, undefined, +0.25));
+  }
+  if (zoomOutBtn) {
+    zoomOutBtn.setAttribute('aria-label', 'Zoom out');
+    zoomOutBtn.addEventListener('click', () => zoomAt(undefined, undefined, -0.25));
+  }
+  if (zoomResetBtn) {
+    zoomResetBtn.setAttribute('aria-label', 'Reset zoom');
+    zoomResetBtn.addEventListener('click', () => { scale = 1; tx = 0; ty = 0; applyTransform(); });
+  }
 
   applyTransform();
 }
 
-/* ===========================
-   MAP INTERACTION MODE (MOBILE)
-   =========================== */
 function setupMapInteractionToggle() {
-  // Check if mobile
-  isMobile = window.matchMedia('(max-width: 768px)').matches;
   if (!isMobile) return;
-
-  // Create toggle button
+  
   const mapWrap = document.getElementById('mapWrap');
   if (!mapWrap) return;
-
-  const toggleContainer = document.createElement('div');
-  toggleContainer.className = 'map-mode-toggle';
   
-  const toggleBtn = document.createElement('button');
-  toggleBtn.setAttribute('aria-label', 'Toggle map interaction mode');
-  toggleBtn.setAttribute('aria-pressed', 'false');
+  const toggle = document.createElement('button');
+  toggle.className = 'map-interaction-toggle';
+  toggle.setAttribute('aria-label', 'Toggle map interaction mode');
+  updateToggleState(toggle);
   
-  // Load saved preference
-  const savedMode = localStorage.getItem('mapInteractionMode');
-  if (savedMode === 'enabled') {
-    mapInteractionEnabled = true;
-  }
-  
-  function updateToggleUI() {
-    if (mapInteractionEnabled) {
-      toggleBtn.textContent = '🗺️ Move Map';
-      toggleBtn.classList.add('active');
-      toggleBtn.setAttribute('aria-pressed', 'true');
-      svg.style.touchAction = 'none';
-    } else {
-      toggleBtn.textContent = '📜 Scroll Page';
-      toggleBtn.classList.remove('active');
-      toggleBtn.setAttribute('aria-pressed', 'false');
+  toggle.addEventListener('click', () => {
+    mapInteractionMode = mapInteractionMode === 'scroll' ? 'pan' : 'scroll';
+    localStorage.setItem('mapInteractionMode', mapInteractionMode);
+    updateToggleState(toggle);
+    
+    // Update SVG touch-action
+    if (mapInteractionMode === 'scroll') {
       svg.style.touchAction = 'pan-y pinch-zoom';
+    } else {
+      svg.style.touchAction = 'none';
     }
+  });
+  
+  mapWrap.appendChild(toggle);
+  
+  // Set initial touch-action
+  if (mapInteractionMode === 'scroll') {
+    svg.style.touchAction = 'pan-y pinch-zoom';
+  } else {
+    svg.style.touchAction = 'none';
   }
-  
-  toggleBtn.addEventListener('click', () => {
-    mapInteractionEnabled = !mapInteractionEnabled;
-    localStorage.setItem('mapInteractionMode', mapInteractionEnabled ? 'enabled' : 'disabled');
-    updateToggleUI();
-  });
-  
-  updateToggleUI();
-  toggleContainer.appendChild(toggleBtn);
-  mapWrap.appendChild(toggleContainer);
-  
-  // Update on resize
-  window.addEventListener('resize', () => {
-    const nowMobile = window.matchMedia('(max-width: 768px)').matches;
-    if (nowMobile !== isMobile) {
-      isMobile = nowMobile;
-      if (!isMobile) {
-        svg.style.touchAction = 'none';
-      } else {
-        updateToggleUI();
-      }
-    }
-  });
+}
+
+function updateToggleState(toggle) {
+  if (mapInteractionMode === 'scroll') {
+    toggle.textContent = '📜 Scroll Mode';
+    toggle.className = 'map-interaction-toggle scroll-mode';
+    toggle.setAttribute('aria-pressed', 'false');
+  } else {
+    toggle.textContent = '🗺️ Move Map';
+    toggle.className = 'map-interaction-toggle pan-mode';
+    toggle.setAttribute('aria-pressed', 'true');
+  }
 }
 
 /* ===========================
    INIT
    =========================== */
 async function init(){
+  // Detect mobile
+  isMobile = window.matchMedia('(max-width: 768px)').matches;
+  
   fitSvgToArtwork();
 
   const [{ statusMap, lastUpdated }, polysRaw] = await Promise.all([loadSheet(), loadPolygons()]);
-  globalStatusMap = statusMap;
-  const polys = remapPolygonsToArtwork(polysRaw);
+  
+  // Detect and fix duplicate IDs
+  const polysFixed = detectAndFixDuplicateIds(polysRaw);
+  const polys = remapPolygonsToArtwork(polysFixed);
 
   const layer = getPolysLayer();
   layer.innerHTML = "";
+  
+  // Clear hit layer if it exists
+  const hitLayer = svg.querySelector('#hit-layer');
+  if (hitLayer) hitLayer.innerHTML = "";
+  
   polys.forEach(p => makePolygon(p, statusMap));
 
+  // Setup map interaction toggle for mobile
+  setupMapInteractionToggle();
+  
   // Bottom line only (sheet-wide timestamp)
   //const footerEl = document.getElementById("lastUpdated");
   //if (footerEl) {
@@ -602,12 +632,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Detect mobile early
-  isMobile = window.matchMedia('(max-width: 768px)').matches;
-  
   init();
   setupPanZoom();
-  setupMapInteractionToggle();
 });
 
 
